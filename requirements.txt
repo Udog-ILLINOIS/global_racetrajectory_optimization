@@ -1,7 +1,11 @@
-numpy==1.18.1
-matplotlib==3.3.1
-trajectory_planning_helpers==0.76
+# tested with Python 3.10; trajectory_planning_helpers does not support numpy 2.x
+# trajectory_planning_helpers pins quadprog==0.1.7, which no longer builds, so install it separately:
+#   pip install -r requirements.txt
+#   pip install --no-deps trajectory_planning_helpers==0.79
+numpy==1.26.4
+matplotlib==3.10.9
+quadprog==0.1.13
 # the following is required for minimum time optimization only
-casadi==3.5.1
-scipy==1.3.3
-scikit-learn==0.23.1
+casadi==3.8.1
+scipy==1.13.1
+scikit-learn==1.7.2

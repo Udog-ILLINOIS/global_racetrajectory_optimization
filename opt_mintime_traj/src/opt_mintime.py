@@ -16,7 +16,8 @@ def opt_mintime(reftrack: np.ndarray,
                 tpadata_path: str,
                 export_path: str,
                 print_debug: bool = False,
-                plot_debug: bool = False) -> tuple:
+                plot_debug: bool = False,
+                n_init: np.ndarray = None) -> tuple:
     """
     Created by:
     Fabian Christ
@@ -47,6 +48,10 @@ def opt_mintime(reftrack: np.ndarray,
     export_path:    path to output folder for warm start files and solution files
     print_debug:    determines if debug messages are printed
     plot_debug:     determines if debug plots are shown
+    n_init:         optional initial guess of the lateral offset n in m (positive to the left, i.e. -alpha) for every
+                    point of reftrack; None starts IPOPT on the reference line (n = 0) as before. Only n is seeded,
+                    all other states and controls keep their default guess.
+                    Not used with pwr_behavior (powertrain model).
 
     Outputs:
     alpha_opt:      solution vector of the optimization problem containing the lateral shift in m for every point
@@ -77,6 +82,13 @@ def opt_mintime(reftrack: np.ndarray,
     else:
         discr_points = np.arange(reftrack.shape[0])
         a_interp = None
+
+    # initial guess of n at the discretization points (closed: last point = first point)
+    if n_init is None:
+        n_init = np.zeros(no_points_orig)
+    if n_init.size != no_points_orig:
+        raise ValueError("n_init must hold one value per reftrack point!")
+    n_init_cl = np.append(np.asarray(n_init, dtype=float)[discr_points], float(n_init[0]))
 
     # ------------------------------------------------------------------------------------------------------------------
     # PREPARE TRACK INFORMATION ----------------------------------------------------------------------------------------
@@ -563,8 +575,8 @@ def opt_mintime(reftrack: np.ndarray,
     # boundary constraint: lift initial conditions
     Xk = ca.MX.sym('X0', nx)
     w.append(Xk)
-    n_min = (-w_tr_right_interp(0) + pars["optim_opts"]["width_opt"] / 2) / n_s
-    n_max = (w_tr_left_interp(0) - pars["optim_opts"]["width_opt"] / 2) / n_s
+    n_min = float(-w_tr_right_interp(0) + pars["optim_opts"]["width_opt"] / 2) / n_s
+    n_max = float(w_tr_left_interp(0) - pars["optim_opts"]["width_opt"] / 2) / n_s
     if pars["pwr_params_mintime"]["pwr_behavior"]:
         lbw.append([v_min, beta_min, omega_z_min, n_min, xi_min,
                     machine.temp_min, batt.temp_min, inverter.temp_min,
@@ -607,7 +619,7 @@ def opt_mintime(reftrack: np.ndarray,
     else:
         lbw.append([v_min, beta_min, omega_z_min, n_min, xi_min])
         ubw.append([v_max, beta_max, omega_z_max, n_max, xi_max])
-        w0.append([v_guess, 0.0, 0.0, 0.0, 0.0])
+        w0.append([v_guess, 0.0, 0.0, min(max(n_init_cl[0] / n_s, n_min), n_max), 0.0])
     x_opt.append(Xk * x_s)
 
     # loop along the racetrack and formulate path constraints & system dynamic
@@ -635,7 +647,8 @@ def opt_mintime(reftrack: np.ndarray,
                            radiators.temp_cool_mi_guess, radiators.temp_cool_b_guess,
                            batt.soc_guess])
             else:
-                w0.append([v_guess, 0.0, 0.0, 0.0, 0.0])
+                n_guess = (n_init_cl[k] + tau[j + 1] * (n_init_cl[k + 1] - n_init_cl[k])) / n_s
+                w0.append([v_guess, 0.0, 0.0, n_guess, 0.0])
 
         # loop over all collocation points
         Xk_end = D[0] * Xk
@@ -676,8 +689,8 @@ def opt_mintime(reftrack: np.ndarray,
         # add new decision variables for state at end of the collocation interval
         Xk = ca.MX.sym('X_' + str(k + 1), nx)
         w.append(Xk)
-        n_min = (-w_tr_right_interp(k + 1) + pars["optim_opts"]["width_opt"] / 2.0) / n_s
-        n_max = (w_tr_left_interp(k + 1) - pars["optim_opts"]["width_opt"] / 2.0) / n_s
+        n_min = float(-w_tr_right_interp(k + 1) + pars["optim_opts"]["width_opt"] / 2.0) / n_s
+        n_max = float(w_tr_left_interp(k + 1) - pars["optim_opts"]["width_opt"] / 2.0) / n_s
         if pars["pwr_params_mintime"]["pwr_behavior"]:
             lbw.append([v_min, beta_min, omega_z_min, n_min, xi_min,
                         machine.temp_min, batt.temp_min, inverter.temp_min,
@@ -694,7 +707,7 @@ def opt_mintime(reftrack: np.ndarray,
         else:
             lbw.append([v_min, beta_min, omega_z_min, n_min, xi_min])
             ubw.append([v_max, beta_max, omega_z_max, n_max, xi_max])
-            w0.append([v_guess, 0.0, 0.0, 0.0, 0.0])
+            w0.append([v_guess, 0.0, 0.0, min(max(n_init_cl[k + 1] / n_s, n_min), n_max), 0.0])
 
         # add equality constraint
         g.append(Xk_end - Xk)

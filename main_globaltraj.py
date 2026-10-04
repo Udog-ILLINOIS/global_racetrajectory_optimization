@@ -7,7 +7,6 @@ import trajectory_planning_helpers as tph
 import copy
 import matplotlib.pyplot as plt
 import configparser
-import pkg_resources
 import helper_funcs_glob
 
 """
@@ -66,12 +65,16 @@ opt_type = 'mintime'
 #                               either with linear regression or with gaussian basis functions (requires friction map)
 # reopt_mintime_solution:       reoptimization of the mintime solution by min. curv. opt. for improved curv. smoothness
 # recalc_vel_profile_by_tph:    override mintime velocity profile by ggv based calculation (see TPH package)
+# init_line:                    initial guess for IPOPT: None starts on the reference line (stock behavior), else path to
+#                               a CSV of a closed line (columns x_m, y_m first; ',' or ';' separated, '#' comments),
+#                               e.g. a min. curv. raceline or a learned line. Only its lateral offset is used.
 
 mintime_opts = {"tpadata": None,
                 "warm_start": False,
                 "var_friction": None,
                 "reopt_mintime_solution": False,
-                "recalc_vel_profile_by_tph": False}
+                "recalc_vel_profile_by_tph": False,
+                "init_line": None}
 
 # lap time calculation table -------------------------------------------------------------------------------------------
 lap_time_mat_opts = {"use_lap_time_mat": False,             # calculate a lap time matrix (diff. top speeds and scales)
@@ -92,26 +95,8 @@ if opt_type == "mintime" and not mintime_opts["recalc_vel_profile_by_tph"] and l
     raise IOError("Lap time calculation table should be created but velocity profile recalculation with TPH solver is"
                   " not allowed!")
 
-# ----------------------------------------------------------------------------------------------------------------------
-# CHECK PYTHON DEPENDENCIES --------------------------------------------------------------------------------------------
-# ----------------------------------------------------------------------------------------------------------------------
-
 # get current path
 file_paths["module"] = os.path.dirname(os.path.abspath(__file__))
-
-# read dependencies from requirements.txt
-requirements_path = os.path.join(file_paths["module"], 'requirements.txt')
-dependencies = []
-
-with open(requirements_path, 'r') as fh:
-    line = fh.readline()
-
-    while line:
-        dependencies.append(line.rstrip())
-        line = fh.readline()
-
-# check dependencies
-pkg_resources.require(dependencies)
 
 # ----------------------------------------------------------------------------------------------------------------------
 # INITIALIZATION OF PATHS ----------------------------------------------------------------------------------------------
@@ -290,6 +275,17 @@ elif opt_type == 'shortest_path':
                                                         print_debug=debug)
 
 elif opt_type == 'mintime':
+    # lateral offset of the initial guess line (if given) at every reference line point
+    n_init = None
+    if mintime_opts["init_line"] is not None:
+        n_init = helper_funcs_glob.src.line_to_n.line_to_n(
+            line_path=mintime_opts["init_line"],
+            reftrack=reftrack_interp,
+            normvectors=normvec_normalized_interp,
+            w_veh=pars["optim_opts"]["width_opt"])
+        print("INFO: IPOPT initial guess taken from %s (|n| mean %.3fm, max %.3fm)"
+              % (mintime_opts["init_line"], np.mean(np.abs(n_init)), np.max(np.abs(n_init))))
+
     # reftrack_interp, a_interp and normvec_normalized_interp are returned for the case that non-regular sampling was
     # applied
     alpha_opt, v_opt, reftrack_interp, a_interp_tmp, normvec_normalized_interp = opt_mintime_traj.src.opt_mintime.\
@@ -302,7 +298,8 @@ elif opt_type == 'mintime':
                     tpadata_path=file_paths["tpadata"],
                     export_path=file_paths["mintime_export"],
                     print_debug=debug,
-                    plot_debug=plot_opts["mintime_plots"])
+                    plot_debug=plot_opts["mintime_plots"],
+                    n_init=n_init)
 
     # replace a_interp if necessary
     if a_interp_tmp is not None:
